@@ -1,3 +1,10 @@
+# PROJECT FILES:
+.idea
+input
+output
+addresses.csv
+
+# PYTHON:
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
