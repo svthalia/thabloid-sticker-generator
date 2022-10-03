@@ -1,0 +1,1 @@
+# thabloid-sticker-generator
