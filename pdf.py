@@ -32,7 +32,7 @@ def generate_pdf(input_data, out_file):
     :param out_file: the output pdf file
     """
     # Initialise PDF settings
-    print('Exporting {} addresses to {}...'.format(len(input_data), out_file))
+    print(f"Exporting {len(input_data)} addresses to {out_file}...")
     pdf = canvas.Canvas(out_file, pagesize=(ppm * page_width, ppm * page_height))
     pdf.setTitle("Thabloid Stickers")
     pdfmetrics.registerFont(TTFont("cmunss", "resources/cmunss.ttf"))
@@ -52,7 +52,7 @@ def generate_pdf(input_data, out_file):
         pdf.drawString(ppm * text_x, ppm * (text_y - margin_text_inner), entry["address"])
         # Draw second address line, postcode and town. Depends on whether a second address line is set
         postal_code_and_city = entry["postal_code"] + " " + entry["city"]
-        if len(entry["country"]) != 0 and entry["country"] != "Netherlands":
+        if len(entry["country"]) != 0 and entry["country"].lower() != "netherlands":
             postal_code_and_city = postal_code_and_city + " (" + entry["country"] + ")"
         if len(entry["address_2"]) != 0:
             pdf.drawString(ppm * text_x, ppm * (text_y - 2 * margin_text_inner), entry["address_2"])

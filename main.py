@@ -1,10 +1,11 @@
 import pandas as pd
 import os
-import util
+import unicodedata
+from util import query_yes_no
 from checker import check_entries
 from pdf import generate_pdf
 
-authors = ['Lars Jeurissen']
+authors = ['Lars Jeurissen', 'Tom Evers']
 version = '1.0'
 
 program_art = '''  _______ _           _     _       _     _      
@@ -28,56 +29,81 @@ Running Thabloid Sticker Generator v{} by {}
 -------------------------------------------------------------------------------'''
 
 
-def read_input(input_dir):
+def read_input(input_directory):
     input("Put all address files (.csv) that you want to process in the 'input' folder. Press enter when done.")
-    csvs = list(filter(lambda file: file.endswith('.csv'), os.listdir(input_dir)))
+    csvs = list(filter(lambda file: file.endswith('.csv'), os.listdir(input_directory)))
     while len(csvs) <= 0:
         input("No .csv files detected. Press enter when you have added them.")
-        csvs = list(filter(lambda file: file.endswith('.csv'), os.listdir(input_dir)))
+        csvs = list(filter(lambda file: file.endswith('.csv'), os.listdir(input_directory)))
 
-    print("Parsing {} input files..".format(len(csvs)))
+    print(f"Parsing {len(csvs)} input file(s)..")
     column_names = ['first_name', 'last_name', 'address', 'address_2', 'postal_code', 'city', 'country']
 
     erroneous_lines = []
-    input_data = pd.concat([pd.read_csv(os.path.join(input_dir, csv), header=0, names=column_names,
+    input_data = pd.concat([pd.read_csv(os.path.join(input_directory, csv), header=0, names=column_names,
                                         engine='python', on_bad_lines=lambda ln: erroneous_lines.append(",".join(ln)),
                                         keep_default_na=False) for csv in csvs]).drop_duplicates()
     if len(erroneous_lines) > 0:
         print("----------")
-        print("Encountered {} erroneous line(s) in the input csv file(s):".format(len(erroneous_lines)))
+        print(f"Encountered {len(erroneous_lines)} erroneous line(s) in the input csv file(s):")
         print(*erroneous_lines, sep="\n")
         print("----------")
-        exit_program = '.'
-        while exit_program != '' and exit_program != 'y' and exit_program != 'n':
-            exit_program = input("We will continue with the remaining entries if you don't exit. "
-                                 "Do you want to exit? (Y/n)").lower()
-        if exit_program != 'n':
+
+        if query_yes_no("We will continue with the remaining entries if you don't exit. Do you want to exit?", "yes"):
             exit(0)
 
-    print("Read {} data entries".format(len(input_data)))
+    print(f"Read {len(input_data)} data entries")
     return input_data
 
 
+def format_entries(input_entries):
+    for i, entry in input_entries.iterrows():
+        entry['address'] = entry['address'].replace(u'\xdf', 'ss')
+        entry['address_2'] = entry['address_2'].replace(u'\xdf', 'ss')
+        entry['city'] = entry['city'].replace(u'\xdf', 'ss')
+        entry['address'] = unicodedata.normalize('NFKD', entry['address']).encode('ascii', 'ignore').decode("ascii")
+        entry['address_2'] = unicodedata.normalize('NFKD', entry['address_2']).encode('ascii', 'ignore').decode("ascii")
+        entry['city'] = unicodedata.normalize('NFKD', entry['city']).encode('ascii', 'ignore').decode("ascii")
+        entry['postal_code'] = entry['postal_code'].upper()
+
+
+def post_process_entries(input_entries):
+        # Do post-processing that PostNL requests
+    for i, entry in input_entries.iterrows():
+        if entry["country"] == "Netherlands" and len(entry["postal_code"]) == 6:
+            entry["postal_code"] = f"{entry['postal_code'][:4]} {entry['postal_code'][4:]}"
+        entry["city"] = entry["city"].upper()
+        entry["country"] = entry["country"].upper()
+
+
 if __name__ == "__main__":
+    # Print introduction
     print(program_art.format(version, ", ".join(authors)))
 
+    # Validate input and output directories
     input_dir = 'input'
     output_dir = 'output'
     if not os.path.exists(input_dir):
         os.mkdir(input_dir)
-    if os.path.exists(output_dir):
-        while len(os.listdir(output_dir)) != 0:
-            input("The 'output' directory is not empty, please delete its contents. Press enter when done.")
-    else:
+    while os.path.exists(output_dir) and os.listdir(output_dir):
+        input("The 'output' directory is not empty, please delete its contents. Press enter when done.")
+    if not os.path.exists(output_dir):
         os.mkdir(output_dir)
 
+    # Read the input from the input directory
     entries = read_input(input_dir)
-    check_entries_input = input("Entries can be checked and corrected using the Google Maps API. "
-                                "Do you want to do this? (Y/n)").lower()
-    while len(check_entries_input) != 0 and check_entries_input != 'y' and check_entries_input != 'n':
-        check_entries_input = input("Do you want to check entries using the Google Maps API? (Y/n)")
 
-    if len(check_entries_input) == 0 or check_entries_input == 'y':
-        entries = check_entries(entries)
+    # Do some basic entry formatting
+    format_entries(entries)
 
+    # Optional: Check entries in the Google Maps API
+    if query_yes_no("Entries can be checked and corrected using the Google Maps API. Do you want to do this?", "yes"):
+        check_entries(entries)
+
+    # Apply postprocessing to the entries
+    post_process_entries(entries)
+
+    # Generate the output PDF
     generate_pdf(entries, os.path.join(output_dir, "sticker_sheet.pdf"))
+
+    print("Generation complete! Thank you for using the amazing Thabloid Sticker Generator, see you in a few months!")

@@ -26,4 +26,13 @@ def query_yes_no(question, default=None):
         elif choice in valid:
             return valid[choice]
         else:
-            print("Please respond with 'yes' or 'no' (or 'y' or 'n').")
+            print("Please respond with 'yes' or 'no' (or 'y' or 'n')")
+
+
+def entry_to_string(entry):
+    string = f"  Name:          {entry['first_name']} {entry['last_name']}\n" \
+             f"  Address:       {entry['address']}\n"
+    if len(entry['address_2']) > 0:
+        string += f"                 {entry['address_2']}\n"
+    return string + f"  Postal code:   {entry['postal_code']}\n" \
+                    f"  City:          {entry['city']}"
