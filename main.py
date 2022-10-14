@@ -2,7 +2,7 @@ import pandas as pd
 import os
 import unicodedata
 from util import query_yes_no
-from checker import check_entries
+from checker import correct_entries
 from pdf import generate_pdf
 
 authors = ['Lars Jeurissen', 'Tom Evers']
@@ -68,7 +68,7 @@ def format_entries(input_entries):
 
 
 def post_process_entries(input_entries):
-        # Do post-processing that PostNL requests
+    # Do post-processing that PostNL requests
     for i, entry in input_entries.iterrows():
         if entry["country"] == "Netherlands" and len(entry["postal_code"]) == 6:
             entry["postal_code"] = f"{entry['postal_code'][:4]} {entry['postal_code'][4:]}"
@@ -98,7 +98,7 @@ if __name__ == "__main__":
 
     # Optional: Check entries in the Google Maps API
     if query_yes_no("Entries can be checked and corrected using the Google Maps API. Do you want to do this?", "yes"):
-        check_entries(entries)
+        correct_entries(entries)
 
     # Apply postprocessing to the entries
     post_process_entries(entries)
