@@ -69,6 +69,7 @@ def format_entries(input_entries):
 
 def post_process_entries(input_entries):
     # Do post-processing that PostNL requests
+    # see https://www.postnl.nl/versturen/brief-of-kaart-versturen/hoe-verstuur-ik-een-brief-of-kaart/brief-adresseren/
     for i, entry in input_entries.iterrows():
         if entry["country"] == "Netherlands" and len(entry["postal_code"]) == 6:
             entry["postal_code"] = f"{entry['postal_code'][:4]} {entry['postal_code'][4:]}"
@@ -97,8 +98,8 @@ if __name__ == "__main__":
     format_entries(entries)
 
     # Optional: Check entries in the Google Maps API
-    if query_yes_no("Entries can be checked and corrected using the Google Maps API. Do you want to do this?", "yes"):
-        correct_entries(entries)
+    if query_yes_no("Entries can be checked and corrected using various APIs. Do you want to do this?", "yes"):
+        correct_entries(entries, output_dir)
 
     # Apply postprocessing to the entries
     post_process_entries(entries)

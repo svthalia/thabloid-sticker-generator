@@ -55,7 +55,7 @@ def get_api_key():
 
 def request_from_google_api(api_key, arguments):
     url = f"https://maps.googleapis.com/maps/api/geocode/json?{arguments}&key={api_key}"
-    print(f"Google URL: {url}")
+    # print(f"Google URL: {url}")
     response = request.urlopen(url)
     try:
         response = eval(response.read().decode("utf-8"))
@@ -243,7 +243,7 @@ def query_dutch_georegister(street, house_number, postal_code, city, house_numbe
     formatted = '&'.join(query_params)
 
     url = f"https://geodata.nationaalgeoregister.nl/locatieserver/v3/free?{formatted}".replace(' ', '+')
-    print(f"Geodata URL: {url}")
+    # print(f"Geodata URL: {url}")
     try:
         return json.loads(request.urlopen(url).read().decode("utf-8"))['response']
     except HTTPError:
@@ -307,12 +307,15 @@ def verify_dutch_address(entry, ignore_argument=""):
     return True
 
 
-def correct_entries(entries):
+def correct_entries(entries, output_dir):
     api_key = get_api_key()
 
+    invalid_entries = []
+    changed_entries = {}
     entries_to_drop = []
 
     for i, entry in tqdm(entries.iterrows(), total=len(entries)):
+        original_entry_dict = entry.to_dict()
         try:
             if entry["first_name"] == "Rico" and entry["last_name"] == "te Wechel":
                 entry["first_name"] = "Grote"
@@ -333,6 +336,7 @@ def correct_entries(entries):
                     # Check if the newly suggested address is correct
                     if verify_dutch_address(address_suggestion):
                         # TODO: Verander de entry dan nog ff want de suggestion is json lol
+                        changed_entries[entry_to_string(original_entry_dict)] = entry_to_string(entry.to_dict())
                         continue
                     # TODO: Google maps vond wel een adres, maar de database vindt hem niet valid?
                     # TODO: Zie hierna, zelfde case maar met meer info?
@@ -341,11 +345,13 @@ def correct_entries(entries):
                 # TODO: Doe dit met de geocode api.
                 # TODO: Also: als er meerde entries zijn check dan of adres overal hetzelfde is dan is het goed
                 if verify_dutch_address(entry, ignore_argument="straatnaam"):
+                    changed_entries[entry_to_string(original_entry_dict)] = entry_to_string(entry.to_dict())
                     continue
 
                 # TODO: Als dit ook niet werkt: misschien was de woonplaatsnaam fout?
                 # TODO: Geocode api query zonder woonplaatsnaam. Als er 1 resultaat is, verander dan
                 if verify_dutch_address(entry, ignore_argument="woonplaatsnaam"):
+                    changed_entries[entry_to_string(original_entry_dict)] = entry_to_string(entry.to_dict())
                     continue
 
                 print(entry_to_string(entry))
@@ -361,7 +367,17 @@ def correct_entries(entries):
                                                  f"Do you want to add this address anyway?", "no"):
                 # Drop invalid results
                 entries_to_drop.append(i)
+                invalid_entries.append(original_entry_dict)
 
     # Drop invalid entries and reset the indices
     entries.drop(entries.index[entries_to_drop], inplace=True)
     entries.reset_index(drop=True, inplace=True)
+
+    # Log changes to output files
+    with open(os.path.join(output_dir, 'invalid_entries.log'), 'w') as file:
+        file.write('\n\n'.join(map(entry_to_string, invalid_entries)))
+
+    with open(os.path.join(output_dir, 'changed_entries.log'), 'w') as file:
+        file.write('\n\n\n'.join({f'ORIGINAL:\n{original}\n'
+                                  f'CHANGED:\n{changed}'
+                                  for original, changed in changed_entries.items()}))

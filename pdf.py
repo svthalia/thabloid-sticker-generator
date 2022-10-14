@@ -51,7 +51,7 @@ def generate_pdf(input_data, out_file):
         pdf.drawString(ppm * text_x, ppm * text_y, entry["first_name"] + " " + entry["last_name"])
         pdf.drawString(ppm * text_x, ppm * (text_y - margin_text_inner), entry["address"])
         # Draw second address line, postcode and town. Depends on whether a second address line is set
-        postal_code_and_city = entry["postal_code"] + " " + entry["city"]
+        postal_code_and_city = entry["postal_code"] + "  " + entry["city"]
         if len(entry["country"]) != 0 and entry["country"].lower() != "netherlands":
             postal_code_and_city = postal_code_and_city + " (" + entry["country"] + ")"
         if len(entry["address_2"]) != 0:
