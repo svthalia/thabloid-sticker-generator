@@ -47,7 +47,7 @@ def get_api_key():
 
         # Check that the api key is valid
         url = f"https://maps.googleapis.com/maps/api/geocode/json?address=a&key={api_key}"
-        if eval(request.urlopen(url).read())["status"] == "REQUEST_DENIED":
+        if json.loads(request.urlopen(url).read())["status"] == "REQUEST_DENIED":
             raise InvalidApiKeyException("The API key in credentials.json was invalid")
 
     return api_key
@@ -55,10 +55,9 @@ def get_api_key():
 
 def request_from_google_api(api_key, arguments):
     url = f"https://maps.googleapis.com/maps/api/geocode/json?{arguments}&key={api_key}"
-    # print(f"Google URL: {url}")
     response = request.urlopen(url)
     try:
-        response = eval(response.read().decode("utf-8"))
+        response = json.loads(response.read().decode("utf-8"))
     except NameError:
         return None
 
@@ -86,6 +85,7 @@ def request_dutch_entry_from_google_api(api_key, entry, include_city=False):
         street_extra = None
         postal_code = None
         city = None
+        country = None
 
         for component in address_components:
             types = component["types"]
@@ -100,9 +100,11 @@ def request_dutch_entry_from_google_api(api_key, entry, include_city=False):
                 postal_code = component["long_name"]
             if "locality" in types:
                 city = component["long_name"]
+            if "country" in types:
+                country = component["short_name"]
 
         return {"street_name": street_name, "street_number": street_number, "street_extra": street_extra,
-                "postal_code": postal_code, "city": city}
+                "postal_code": postal_code, "city": city, "country": country}
     except IndexError:
         return None
     except TypeError:
@@ -115,7 +117,7 @@ def suggest_address_change_with_google_api(api_key, entry):
     address = request_dutch_entry_from_google_api(api_key, entry, True)
 
     # If no response was received, try it again, but without the city
-    if not address:
+    if not address or not address['country'] == 'NL':
         address = request_dutch_entry_from_google_api(api_key, entry, False)
 
     # If all fails, raise an exception
@@ -311,11 +313,11 @@ def correct_entries(entries, output_dir):
     api_key = get_api_key()
 
     invalid_entries = []
-    changed_entries = {}
+    changed_entries = []
     entries_to_drop = []
 
     for i, entry in tqdm(entries.iterrows(), total=len(entries)):
-        original_entry_dict = entry.to_dict()
+        original_entry_dict = entry.to_dict().copy()
         try:
             if entry["first_name"] == "Rico" and entry["last_name"] == "te Wechel":
                 entry["first_name"] = "Grote"
@@ -336,7 +338,11 @@ def correct_entries(entries, output_dir):
                     # Check if the newly suggested address is correct
                     if verify_dutch_address(address_suggestion):
                         # TODO: Verander de entry dan nog ff want de suggestion is json lol
-                        changed_entries[entry_to_string(original_entry_dict)] = entry_to_string(entry.to_dict())
+                        entry['address'] = address_suggestion['address']
+                        entry['postal_code'] = address_suggestion['postal_code']
+                        entry['city'] = address_suggestion['city']
+                        changed_entries.append((entry_to_string(original_entry_dict), entry_to_string(entry.to_dict()),
+                                                'GOOGLE_SUGGESTION'))
                         continue
                     # TODO: Google maps vond wel een adres, maar de database vindt hem niet valid?
                     # TODO: Zie hierna, zelfde case maar met meer info?
@@ -345,13 +351,15 @@ def correct_entries(entries, output_dir):
                 # TODO: Doe dit met de geocode api.
                 # TODO: Also: als er meerde entries zijn check dan of adres overal hetzelfde is dan is het goed
                 if verify_dutch_address(entry, ignore_argument="straatnaam"):
-                    changed_entries[entry_to_string(original_entry_dict)] = entry_to_string(entry.to_dict())
+                    changed_entries.append((entry_to_string(original_entry_dict), entry_to_string(entry.to_dict()),
+                                            'GEOCODE_SUGGESTION_CHANGE_STREET_NAME'))
                     continue
 
                 # TODO: Als dit ook niet werkt: misschien was de woonplaatsnaam fout?
                 # TODO: Geocode api query zonder woonplaatsnaam. Als er 1 resultaat is, verander dan
                 if verify_dutch_address(entry, ignore_argument="woonplaatsnaam"):
-                    changed_entries[entry_to_string(original_entry_dict)] = entry_to_string(entry.to_dict())
+                    changed_entries.append((entry_to_string(original_entry_dict), entry_to_string(entry.to_dict()),
+                                            'GEOCODE_SUGGESTION_CHANGE_CITY'))
                     continue
 
                 print(entry_to_string(entry))
@@ -374,10 +382,13 @@ def correct_entries(entries, output_dir):
     entries.reset_index(drop=True, inplace=True)
 
     # Log changes to output files
-    with open(os.path.join(output_dir, 'invalid_entries.log'), 'w') as file:
+    with open(os.path.join(output_dir, 'invalid_entries.log'), 'w', encoding='utf8') as file:
         file.write('\n\n'.join(map(entry_to_string, invalid_entries)))
 
-    with open(os.path.join(output_dir, 'changed_entries.log'), 'w') as file:
-        file.write('\n\n\n'.join({f'ORIGINAL:\n{original}\n'
-                                  f'CHANGED:\n{changed}'
-                                  for original, changed in changed_entries.items()}))
+    with open(os.path.join(output_dir, 'changed_entries.log'), 'w', encoding='utf8') as file:
+        file.write('\n\n\n'.join(map(lambda changed_entry: f'ORIGINAL:\n{changed_entry[0]}\n'
+                                                           f'CHANGED:\n{changed_entry[1]}\n'
+                                                           f'REASON: {changed_entry[2]}', changed_entries)))
+        # file.write('\n\n\n'.join({f'ORIGINAL:\n{original}\n'
+        #                          f'CHANGED:\n{changed}'
+        #                          for original, changed in changed_entries.items()}))
