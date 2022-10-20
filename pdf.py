@@ -52,13 +52,15 @@ def generate_pdf(input_data, out_file):
         pdf.drawString(ppm * text_x, ppm * (text_y - margin_text_inner), entry["address"])
         # Draw second address line, postcode and town. Depends on whether a second address line is set
         postal_code_and_city = entry["postal_code"] + "  " + entry["city"]
-        if len(entry["country"]) != 0 and entry["country"].lower() != "netherlands":
-            postal_code_and_city = postal_code_and_city + " (" + entry["country"] + ")"
         if len(entry["address_2"]) != 0:
             pdf.drawString(ppm * text_x, ppm * (text_y - 2 * margin_text_inner), entry["address_2"])
             pdf.drawString(ppm * text_x, ppm * (text_y - 3 * margin_text_inner), postal_code_and_city)
+            if len(entry["country"]) != 0 and entry["country"].lower() != "netherlands":
+                pdf.drawString(ppm * text_x, ppm * (text_y - 4 * margin_text_inner), entry["country"].upper())
         else:
             pdf.drawString(ppm * text_x, ppm * (text_y - 2 * margin_text_inner), postal_code_and_city)
+            if len(entry["country"]) != 0 and entry["country"].lower() != "netherlands":
+                pdf.drawString(ppm * text_x, ppm * (text_y - 3 * margin_text_inner), entry["country"].upper())
 
         # If we reached a new page, print the current page and re-set the font
         if (i + 1) % items_per_page == 0:

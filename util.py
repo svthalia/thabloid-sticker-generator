@@ -39,8 +39,11 @@ def entry_to_string(entry: dict) -> str:
              f"  Address:       {entry['address']}\n"
     if len(entry['address_2']) > 0:
         string += f"                 {entry['address_2']}\n"
-    return string + f"  Postal code:   {entry['postal_code']}\n" \
-                    f"  City:          {entry['city']}"
+    string += f"  Postal code:   {entry['postal_code']}\n" \
+              f"  City:          {entry['city']}\n"
+    if entry['country'] != 'Netherlands':
+        string += f"  Country:       {entry['country']}"
+    return string
 
 
 def format_dutch_address(address: str) -> (str, str, str):

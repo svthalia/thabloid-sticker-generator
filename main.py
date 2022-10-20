@@ -30,6 +30,7 @@ Running Thabloid Sticker Generator v{} by {}
 
 
 def read_input(input_directory):
+    # TODO: Om de een of andere reden wordt de ringel S uit de input csv gehaald
     input("Put all address files (.csv) that you want to process in the 'input' folder. Press enter when done.")
     csvs = list(filter(lambda file: file.endswith('.csv'), os.listdir(input_directory)))
     while len(csvs) <= 0:
@@ -58,13 +59,14 @@ def read_input(input_directory):
 
 def format_entries(input_entries):
     for i, entry in input_entries.iterrows():
-        entry['address'] = entry['address'].replace(u'\xdf', 'ss')
-        entry['address_2'] = entry['address_2'].replace(u'\xdf', 'ss')
-        entry['city'] = entry['city'].replace(u'\xdf', 'ss')
         entry['address'] = unicodedata.normalize('NFKD', entry['address']).encode('ascii', 'ignore').decode("ascii")
         entry['address_2'] = unicodedata.normalize('NFKD', entry['address_2']).encode('ascii', 'ignore').decode("ascii")
         entry['city'] = unicodedata.normalize('NFKD', entry['city']).encode('ascii', 'ignore').decode("ascii")
         entry['postal_code'] = entry['postal_code'].upper()
+        # Format german s
+        entry['address'] = entry['address'].replace(u'\xdf', 'ss')
+        entry['address_2'] = entry['address_2'].replace(u'\xdf', 'ss')
+        entry['city'] = entry['city'].replace(u'\xdf', 'ss')
 
 
 def post_process_entries(input_entries):
@@ -75,6 +77,10 @@ def post_process_entries(input_entries):
             entry["postal_code"] = f"{entry['postal_code'][:4]} {entry['postal_code'][4:]}"
         entry["city"] = entry["city"].upper()
         entry["country"] = entry["country"].upper()
+        # Format german s
+        entry['address'] = entry['address'].replace(u'\xdf', 'ss')
+        entry['address_2'] = entry['address_2'].replace(u'\xdf', 'ss')
+        entry['city'] = entry['city'].replace(u'\xdf', 'ss')
 
 
 if __name__ == "__main__":

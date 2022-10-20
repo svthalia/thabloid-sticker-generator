@@ -2,7 +2,8 @@ import difflib
 import os
 import json
 import re
-from urllib.error import HTTPError
+from http.client import RemoteDisconnected
+from urllib.error import HTTPError, URLError
 
 from tqdm import tqdm
 from json import JSONDecodeError
@@ -66,7 +67,7 @@ def request_from_google_api(api_key, arguments):
     return response
 
 
-def request_dutch_entry_from_google_api(api_key, entry, include_city=False):
+def request_entry_with_google_api(api_key, entry, include_city=False):
     # Parse arguments
     arguments = f"address={entry['address'].replace(' ', '+')}"
     if include_city:
@@ -85,7 +86,8 @@ def request_dutch_entry_from_google_api(api_key, entry, include_city=False):
         street_extra = None
         postal_code = None
         city = None
-        country = None
+        country_short = None
+        country_long = None
 
         for component in address_components:
             types = component["types"]
@@ -101,24 +103,29 @@ def request_dutch_entry_from_google_api(api_key, entry, include_city=False):
             if "locality" in types:
                 city = component["long_name"]
             if "country" in types:
-                country = component["short_name"]
+                country_short = component["short_name"]
+                country_long = component["long_name"]
 
         return {"street_name": street_name, "street_number": street_number, "street_extra": street_extra,
-                "postal_code": postal_code, "city": city, "country": country}
+                "postal_code": postal_code, "city": city, "country_short": country_short, "country_long": country_long}
     except IndexError:
         return None
     except TypeError:
         return None
 
 
-def suggest_address_change_with_google_api(api_key, entry):
+def suggest_address_with_google_api(api_key, entry, in_nl=True):
     result = entry.to_dict()
     # Get a response from the address and city
-    address = request_dutch_entry_from_google_api(api_key, entry, True)
-
-    # If no response was received, try it again, but without the city
-    if not address or not address['country'] == 'NL':
-        address = request_dutch_entry_from_google_api(api_key, entry, False)
+    address = request_entry_with_google_api(api_key, entry, True)
+    if in_nl:
+        # If no response was received, or the response country was invalid, or no full address was provided,
+        # try without city
+        if not address or not address['country_short'] == 'NL' or not address['street_name'] \
+                or not address['street_number'] or not address['postal_code'] or not address['city']:
+            address = request_entry_with_google_api(api_key, entry, False)
+    elif not address:
+        address = request_entry_with_google_api(api_key, entry, False)
 
     # If all fails, raise an exception
     if not address:
@@ -131,102 +138,39 @@ def suggest_address_change_with_google_api(api_key, entry):
         result["postal_code"] = address["postal_code"]
     if address["city"]:
         result["city"] = address["city"]
+    if not in_nl and address["country_long"]:
+        result["country"] = address["country_long"]
     return result
 
 
-def handle_foreign_postal_code(api_key, entry):
-    # If the country is not 'Netherlands', it is a postal code from another country
-    if not entry["country"] == "Netherlands":
-        return True
-    # Otherwise, query the user
-    if query_yes_no("\n---------------------------------------------------\n"
-                    "In the following entry:\n"
-                    f"{entry_to_string(entry)}\n"
-                    f"Is {entry['postal_code']} actually a postal code from another country?"):
-        # Send request
-        arguments = f"address={entry['address'].replace(' ', '+')}+{entry['city'].replace(' ', '+')}"
-        response = request_from_google_api(api_key, arguments)
-        try:
-            # Fetch the address components from the result
-            address_components = list(filter(lambda x: "address_components" in x,
-                                             response["results"]))[0]["address_components"]
-            # Get country
-            country = list(filter(lambda x: "country" in x["types"], address_components))[0]["long_name"]
-            # Check with the user if the country is correct
-            if query_yes_no(f"Is {country} the correct country for this entry?", "yes"):
-                entry["country"] = country
-                return True
-            else:
-                raise InvalidAddressException("No correct country could be found")
-        except IndexError:
-            return None, None
-    # Return that it was not a postal code from another country
-    return False
-
-
-def get_number(address):
-    try:
-        return address[re.search("\d", address).span()[0]:]
-    except AttributeError:
-        return None
-
-
-def check_address(api_key, entry, correct_addresses):
-    # Get the house number of the address
-    house_number = get_number(entry['address'])
-    closest_street = ""
-    closest_ratio = 0
-    # Loop through all options for correct addresses
-    for correct_address in correct_addresses:
-        # Convert to ascii
-        street = unicodedata.normalize('NFKD', correct_address['straat']).encode('ascii', 'ignore').decode("ascii")
-
-        # If the street name that was found is a part of the already known address, check if they are equal.
-        # If they are not, set the address equal to the street with the house number
-        if street.lower() in entry['address'].lower():
-            if not street.lower() == entry['address'].lower():
-                entry['address'] = street + (" " + house_number if house_number else "")
-            return
-
-        # Caculate the similarity ratio between the collected street and the address, store the lowest ratio
-        similarity_ratio = difflib.SequenceMatcher(None, street.lower(), entry['address'].lower()).ratio()
-        if similarity_ratio > closest_ratio:
-            closest_street = street
-            closest_ratio = similarity_ratio
-
-    # Append the house number to the street
-    street = closest_street + (" " + house_number if house_number else "")
-    # If the closest ratio was high enough, we alter the entry and are done
-    if closest_ratio > 0.75:
-        entry['address'] = street
-        return
-    # Otherwise, we ask the user if the addresses are similar enough.
-    # If they are not similar enough, we use the google maps API to alter the entry
-    if query_yes_no("\n---------------------------------------------------\n"
-                    "The Postal Code API checked the following entry:\n"
-                    f"{entry_to_string(entry)}\n"
-                    f"And proposed the following modification:\n"
-                    f"  Address:       {street}\n"
-                    "Are these the same addresses?"):
-        entry["address"] = street
-    else:
-        None
-        # TODO: fix_dutch_postal_code(api_key, entry)
-
-
-def validate_address_with_postal_code(api_key, entry):
-    # Retrieve addresses from the postal code api
-    try:
-        url = f"http://postcode-api.nl/adres/{entry['postal_code'].replace(' ', '')}"
-        correct_addresses = json.load(request.urlopen(url))
-    except JSONDecodeError:
-        correct_addresses = []
-    # If there was at least one valid address, check the addresses. Otherwise, raise an exception
-    if len(correct_addresses) != 0:
-        check_address(api_key, entry, correct_addresses)
-    else:
-        None
-        # TODO: fix_dutch_postal_code(api_key, entry)
+# def handle_foreign_postal_code(api_key, entry):
+#     # If the country is not 'Netherlands', it is a postal code from another country
+#     if not entry["country"] == "Netherlands":
+#         return True
+#     # Otherwise, query the user
+#     if query_yes_no("\n---------------------------------------------------\n"
+#                     "In the following entry:\n"
+#                     f"{entry_to_string(entry)}\n"
+#                     f"Is {entry['postal_code']} actually a postal code from another country?"):
+#         # Send request
+#         arguments = f"address={entry['address'].replace(' ', '+')}+{entry['city'].replace(' ', '+')}"
+#         response = request_from_google_api(api_key, arguments)
+#         try:
+#             # Fetch the address components from the result
+#             address_components = list(filter(lambda x: "address_components" in x,
+#                                              response["results"]))[0]["address_components"]
+#             # Get country
+#             country = list(filter(lambda x: "country" in x["types"], address_components))[0]["long_name"]
+#             # Check with the user if the country is correct
+#             if query_yes_no(f"Is {country} the correct country for this entry?", "yes"):
+#                 entry["country"] = country
+#                 return True
+#             else:
+#                 raise InvalidAddressException("No correct country could be found")
+#         except IndexError:
+#             return None, None
+#     # Return that it was not a postal code from another country
+#     return False
 
 
 def query_dutch_georegister(street, house_number, postal_code, city, house_number_extra=None):
@@ -247,22 +191,25 @@ def query_dutch_georegister(street, house_number, postal_code, city, house_numbe
     url = f"https://geodata.nationaalgeoregister.nl/locatieserver/v3/free?{formatted}".replace(' ', '+')
     # print(f"Geodata URL: {url}")
     try:
-        return json.loads(request.urlopen(url).read().decode("utf-8"))['response']
+        # As the Geodata API is sometimes unstable, we try to send the request a number of times
+        response = None
+        attempts = 3
+        for i in range(0, attempts - 1):
+            try:
+                response = request.urlopen(url, timeout=5)
+                break
+            except RemoteDisconnected:
+                if i == attempts - 1:
+                    return None
+            except TimeoutError:
+                if i == attempts - 1:
+                    return None
+            except URLError:
+                if i == attempts - 1:
+                    return None
+        return json.loads(response.read().decode("utf-8"))['response']
     except HTTPError:
         return None
-
-
-#
-# def suggest_address_change_with_geocode_api(entry, ignore_argument):
-#     street, house_number, house_number_extra = format_dutch_address(entry["address"])
-#     if not house_number:
-#         return
-#     postal_code = format_dutch_postal_code(entry["postal_code"])
-#
-#     if ignore_argument == "street_name":
-#         response = query_dutch_georegister(street, house_number, postal_code, entry['city'], house_number_extra)
-#     elif ignore_argument == "city":
-#         response = query_dutch_georegister(street, house_number, postal_code, None, house_number_extra)
 
 
 def verify_dutch_address(entry, ignore_argument=""):
@@ -275,6 +222,10 @@ def verify_dutch_address(entry, ignore_argument=""):
         response = query_dutch_georegister(None, house_number, postal_code, entry['city'], house_number_extra)
     elif ignore_argument == "woonplaatsnaam":
         response = query_dutch_georegister(street, house_number, postal_code, None, house_number_extra)
+    elif ignore_argument == "postcode":
+        response = query_dutch_georegister(street, house_number, None, entry['city'], house_number_extra)
+        if int(response['numFound']) == 0:
+            response = query_dutch_georegister(street, house_number, None, entry['city'], None)
     else:
         response = query_dutch_georegister(street, house_number, postal_code, entry['city'], house_number_extra)
 
@@ -288,17 +239,41 @@ def verify_dutch_address(entry, ignore_argument=""):
             return False
         removed_extra = True
     elif response['numFound'] > 1 and ignore_argument:
-        # Check if the ignored elements are the same for all responses
-        expected = response['docs'][0][ignore_argument]
-        for i in range(1, response['numFound']):
-            if not response['docs'][i][ignore_argument] == expected:
+        result_index = 0
+        if ignore_argument == "postcode":
+            # For the postal code, if there are over 10 responses, we ignore the results
+            if int(response['numFound']) > 10:
                 return False
+            # Otherwise, if there is more than one response, we check if we have a match
+            if not int(response['numFound']) == 1:
+                # Else, check if there is exactly one that has matching data
+                result_index = -1
+                for i in range(0, int(response['numFound'])):
+                    if street in response['docs'][i]['straatnaam'] \
+                            and response['docs'][i]['huis_nlt'].startswith(house_number) \
+                            and response['docs'][i]['woonplaatsnaam'] == entry['city']:
+                        # If the resulting index was already set, we have multiple matching entries. This is incorrect
+                        if not result_index == -1:
+                            return False
+                        result_index = i
+                # If no entry was found, return
+                if result_index == -1:
+                    return False
+        else:
+            # For the street name and city name, check if the ignored elements are the same for all responses
+            expected = response['docs'][0][ignore_argument]
+            for i in range(1, response['numFound']):
+                if not response['docs'][i][ignore_argument] == expected:
+                    return False
         # If they are, set that value and return
-        response_address = response['docs'][0]
+        response_address = response['docs'][result_index]
         if ignore_argument == "straatnaam":
             entry['address'] = entry['address'].replace(street, response_address['straatnaam'])
         elif ignore_argument == "woonplaatsnaam":
             entry['city'] = response_address['woonplaatsnaam']
+        elif ignore_argument == "postcode":
+            entry['address'] = entry['address'].replace(street, response_address['straatnaam'])
+            entry['postal_code'] = response_address['postcode']
         return True
 
     response_address = response['docs'][0]
@@ -333,16 +308,16 @@ def correct_entries(entries, output_dir):
                     continue
 
                 # Attempt to fix the address with Google Maps
-                address_suggestion = suggest_address_change_with_google_api(api_key, entry)
+                address_suggestion = suggest_address_with_google_api(api_key, entry)
                 if address_suggestion:
                     # Check if the newly suggested address is correct
                     if verify_dutch_address(address_suggestion):
-                        # TODO: Verander de entry dan nog ff want de suggestion is json lol
+                        # Change the entry to the suggestion
                         entry['address'] = address_suggestion['address']
                         entry['postal_code'] = address_suggestion['postal_code']
                         entry['city'] = address_suggestion['city']
                         changed_entries.append((entry_to_string(original_entry_dict), entry_to_string(entry.to_dict()),
-                                                'GOOGLE_SUGGESTION'))
+                                                'GOOGLE_SUGGESTION_DUTCH'))
                         continue
                     # TODO: Google maps vond wel een adres, maar de database vindt hem niet valid?
                     # TODO: Zie hierna, zelfde case maar met meer info?
@@ -352,20 +327,41 @@ def correct_entries(entries, output_dir):
                 # TODO: Also: als er meerde entries zijn check dan of adres overal hetzelfde is dan is het goed
                 if verify_dutch_address(entry, ignore_argument="straatnaam"):
                     changed_entries.append((entry_to_string(original_entry_dict), entry_to_string(entry.to_dict()),
-                                            'GEOCODE_SUGGESTION_CHANGE_STREET_NAME'))
+                                            'GEODATA_SUGGESTION_CHANGE_STREET_NAME'))
                     continue
 
                 # TODO: Als dit ook niet werkt: misschien was de woonplaatsnaam fout?
                 # TODO: Geocode api query zonder woonplaatsnaam. Als er 1 resultaat is, verander dan
                 if verify_dutch_address(entry, ignore_argument="woonplaatsnaam"):
                     changed_entries.append((entry_to_string(original_entry_dict), entry_to_string(entry.to_dict()),
-                                            'GEOCODE_SUGGESTION_CHANGE_CITY'))
+                                            'GEODATA_SUGGESTION_CHANGE_CITY'))
                     continue
 
-                print(entry_to_string(entry))
+                if verify_dutch_address(entry, ignore_argument="postcode"):
+                    changed_entries.append((entry_to_string(original_entry_dict), entry_to_string(entry.to_dict()),
+                                            'GEODATA_SUGGESTION_CHANGE_POSTAL_CODE'))
+                    continue
             else:
-                # Do other stuff
-                None
+                # Verify the international address with the Google Maps API
+                address_suggestion = suggest_address_with_google_api(api_key, entry, False)
+                if address_suggestion:
+                    # Check if the suggestion changed something. If so, add it to the changed entries
+                    if not entry['address'].lower() == address_suggestion['address'].lower().replace(u'\xdf', 'ss') \
+                            or not entry['postal_code'].lower() == address_suggestion['postal_code'].lower() \
+                            or not entry['city'].lower() == address_suggestion['city'].lower().replace(u'\xdf', 'ss') \
+                            or not entry['country'].lower() == address_suggestion['country'].lower():
+                        changed_entries.append((entry_to_string(original_entry_dict),
+                                                entry_to_string(address_suggestion),
+                                                'GOOGLE_SUGGESTION_NON_DUTCH'))
+                    # Change the entry to the suggestion
+                    entry['address'] = address_suggestion['address']
+                    entry['postal_code'] = address_suggestion['postal_code']
+                    entry['city'] = address_suggestion['city']
+                    entry['country'] = address_suggestion['country']
+                    continue
+
+            # TODO: Request user? anders verwijderen
+            print(f'\n{entry_to_string(entry)}')
 
         except InvalidAddressException as err:
             if not err.query or not query_yes_no(f"\n---------------------------------------------------\n"
