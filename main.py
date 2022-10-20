@@ -5,7 +5,7 @@ from util import query_yes_no
 from checker import correct_entries
 from pdf import generate_pdf
 
-authors = ['Lars Jeurissen', 'Tom Evers']
+authors = ['Lars Jeurissen']
 version = '1.0'
 
 program_art = '''  _______ _           _     _       _     _      
@@ -30,7 +30,6 @@ Running Thabloid Sticker Generator v{} by {}
 
 
 def read_input(input_directory):
-    # TODO: Om de een of andere reden wordt de ringel S uit de input csv gehaald
     input("Put all address files (.csv) that you want to process in the 'input' folder. Press enter when done.")
     csvs = list(filter(lambda file: file.endswith('.csv'), os.listdir(input_directory)))
     while len(csvs) <= 0:
@@ -44,6 +43,7 @@ def read_input(input_directory):
     input_data = pd.concat([pd.read_csv(os.path.join(input_directory, csv), header=0, names=column_names,
                                         engine='python', on_bad_lines=lambda ln: erroneous_lines.append(",".join(ln)),
                                         keep_default_na=False) for csv in csvs]).drop_duplicates()
+    input_data.reset_index(drop=True, inplace=True)
     if len(erroneous_lines) > 0:
         print("----------")
         print(f"Encountered {len(erroneous_lines)} erroneous line(s) in the input csv file(s):")
@@ -59,14 +59,15 @@ def read_input(input_directory):
 
 def format_entries(input_entries):
     for i, entry in input_entries.iterrows():
+        # Convert german s to double s
+        entry['address'] = entry['address'].replace(u'\xdf', 'ss')
+        entry['address_2'] = entry['address_2'].replace(u'\xdf', 'ss')
+        entry['city'] = entry['city'].replace(u'\xdf', 'ss')
+        # Format to ascii
         entry['address'] = unicodedata.normalize('NFKD', entry['address']).encode('ascii', 'ignore').decode("ascii")
         entry['address_2'] = unicodedata.normalize('NFKD', entry['address_2']).encode('ascii', 'ignore').decode("ascii")
         entry['city'] = unicodedata.normalize('NFKD', entry['city']).encode('ascii', 'ignore').decode("ascii")
         entry['postal_code'] = entry['postal_code'].upper()
-        # Format german s
-        entry['address'] = entry['address'].replace(u'\xdf', 'ss')
-        entry['address_2'] = entry['address_2'].replace(u'\xdf', 'ss')
-        entry['city'] = entry['city'].replace(u'\xdf', 'ss')
 
 
 def post_process_entries(input_entries):
@@ -105,7 +106,9 @@ if __name__ == "__main__":
 
     # Optional: Check entries in the Google Maps API
     if query_yes_no("Entries can be checked and corrected using various APIs. Do you want to do this?", "yes"):
-        correct_entries(entries, output_dir)
+        no_invalid, no_changed = correct_entries(entries, output_dir)
+        print(f"Number of invalid addresses: {no_invalid}")
+        print(f"Number of changed addresses: {no_changed}")
 
     # Apply postprocessing to the entries
     post_process_entries(entries)

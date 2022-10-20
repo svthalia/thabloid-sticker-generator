@@ -40,9 +40,9 @@ def entry_to_string(entry: dict) -> str:
     if len(entry['address_2']) > 0:
         string += f"                 {entry['address_2']}\n"
     string += f"  Postal code:   {entry['postal_code']}\n" \
-              f"  City:          {entry['city']}\n"
+              f"  City:          {entry['city']}"
     if entry['country'] != 'Netherlands':
-        string += f"  Country:       {entry['country']}"
+        string += f"\n  Country:       {entry['country']}"
     return string
 
 

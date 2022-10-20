@@ -9,17 +9,21 @@ from tqdm import tqdm
 from json import JSONDecodeError
 from urllib import request
 
-import unicodedata
-
 from util import entry_to_string, query_yes_no, format_dutch_address
-from exceptions import *
 
 dutch_postal_code_regex = re.compile("^[1-9]\d{3} ?(?!SA|SD|SS)[A-Z]{2}$")
+
+
+class InvalidApiKeyException(Exception):
+    def __init__(self, message):
+        self.message = f"Failed to check entries: {message}"
 
 
 def get_api_key():
     # Check that the credentials file exists
     if not os.path.exists("input/credentials.json"):
+        with open("input/credentials.json", "w") as file:
+            file.write('''{\n\t"google_maps_api_key": "INSERT_MAPS_API_KEY"\n}''')
         raise InvalidApiKeyException("No Google Maps API key given (input/credentials.json)")
 
     with open("input/credentials.json") as file:
@@ -56,6 +60,7 @@ def get_api_key():
 
 def request_from_google_api(api_key, arguments):
     url = f"https://maps.googleapis.com/maps/api/geocode/json?{arguments}&key={api_key}"
+    # print(f'Google URL: {url}')
     response = request.urlopen(url)
     try:
         response = json.loads(response.read().decode("utf-8"))
@@ -143,36 +148,6 @@ def suggest_address_with_google_api(api_key, entry, in_nl=True):
     return result
 
 
-# def handle_foreign_postal_code(api_key, entry):
-#     # If the country is not 'Netherlands', it is a postal code from another country
-#     if not entry["country"] == "Netherlands":
-#         return True
-#     # Otherwise, query the user
-#     if query_yes_no("\n---------------------------------------------------\n"
-#                     "In the following entry:\n"
-#                     f"{entry_to_string(entry)}\n"
-#                     f"Is {entry['postal_code']} actually a postal code from another country?"):
-#         # Send request
-#         arguments = f"address={entry['address'].replace(' ', '+')}+{entry['city'].replace(' ', '+')}"
-#         response = request_from_google_api(api_key, arguments)
-#         try:
-#             # Fetch the address components from the result
-#             address_components = list(filter(lambda x: "address_components" in x,
-#                                              response["results"]))[0]["address_components"]
-#             # Get country
-#             country = list(filter(lambda x: "country" in x["types"], address_components))[0]["long_name"]
-#             # Check with the user if the country is correct
-#             if query_yes_no(f"Is {country} the correct country for this entry?", "yes"):
-#                 entry["country"] = country
-#                 return True
-#             else:
-#                 raise InvalidAddressException("No correct country could be found")
-#         except IndexError:
-#             return None, None
-#     # Return that it was not a postal code from another country
-#     return False
-
-
 def query_dutch_georegister(street, house_number, postal_code, city, house_number_extra=None):
     query_params = [f"fl=woonplaatsnaam,postcode,straatnaam,huis_nlt"]
     if street:
@@ -231,13 +206,17 @@ def verify_dutch_address(entry, ignore_argument=""):
 
     removed_extra = False
     if not response or response['numFound'] > 25000:
+        # If there was no response or there were WAY too many results, we return a failure
         return False
-    elif response['numFound'] == 0:
-        # TODO: Als de house number extra niet bestaat hoeft dit dus niet
+    elif response['numFound'] == 0 and house_number_extra:
+        # If there were 0 results and a house number extra was used, try it again, but without the extra part
         response = query_dutch_georegister(street, house_number, postal_code, entry['city'])
         if response['numFound'] == 0:
             return False
         removed_extra = True
+    elif response['numFound'] == 0:
+        # Otherwise, if there were 0 results, we return false
+        return False
     elif response['numFound'] > 1 and ignore_argument:
         result_index = 0
         if ignore_argument == "postcode":
@@ -277,11 +256,30 @@ def verify_dutch_address(entry, ignore_argument=""):
         return True
 
     response_address = response['docs'][0]
-    if response['numFound'] == 1 and not removed_extra:
-        entry['address'] = f"{response_address['straatnaam']} {response_address['huis_nlt']}"
+    if response['numFound'] == 1:
+        if not removed_extra:
+            # If the initial query was fully correct, we set the street name accordingly
+            entry['address'] = f"{response_address['straatnaam']} {response_address['huis_nlt']}"
+        else:
+            # If the secondary query was correct, we set the street name accordingly
+            entry['address'] = entry['address'].replace(street, response_address['straatnaam'])
     entry['postal_code'] = response_address['postcode']
     entry['city'] = response_address['woonplaatsnaam']
     return True
+
+
+def is_similar(address_1, address_2):
+    postal_code_1 = address_1['postal_code'].lower()
+    postal_code_2 = address_2['postal_code'].lower()
+    if address_1["country"] == "Netherlands" and not len(postal_code_1) == 6:
+        postal_code_1 = postal_code_1.replace(' ', '')
+    if address_2["country"] == "Netherlands" and not len(postal_code_2) == 6:
+        postal_code_2 = postal_code_2.replace(' ', '')
+
+    return address_1['address'].lower() == address_2['address'].lower().replace(u'\xdf', 'ss') \
+        and postal_code_1 == postal_code_2 \
+        and address_1['city'].lower() == address_2['city'].lower().replace(u'\xdf', 'ss') \
+        and address_1['country'].lower() == address_2['country'].lower()
 
 
 def correct_entries(entries, output_dir):
@@ -293,88 +291,81 @@ def correct_entries(entries, output_dir):
 
     for i, entry in tqdm(entries.iterrows(), total=len(entries)):
         original_entry_dict = entry.to_dict().copy()
-        try:
-            if entry["first_name"] == "Rico" and entry["last_name"] == "te Wechel":
-                entry["first_name"] = "Grote"
-                entry["last_name"] = "Smurf"
+        if entry["first_name"] == "Rico" and entry["last_name"] == "te Wechel":
+            entry["first_name"] = "Grote"
+            entry["last_name"] = "Smurf"
 
-            # Check that the address is not empty and not removed
-            if entry["address"] == "" or "<removed>" in entry["address"]:
-                raise InvalidAddressException("Missing data for 'address' field")
+        # Check that the address is not empty and not removed. Otherwise, remove it
+        if entry["address"] == "" or "<removed>" in entry["address"]:
+            entries_to_drop.append(i)
+            invalid_entries.append(original_entry_dict)
+            continue
 
-            if entry["country"] == "Netherlands":
-                # Verify the Dutch address. If it is a fully correct address, we continue
-                if verify_dutch_address(entry):
-                    continue
+        if entry["country"] == "Netherlands":
+            # Verify the Dutch address. If it is a fully correct address, we continue
+            if verify_dutch_address(entry):
+                # Check if the suggestion changed something. If so, add it to the changed entries
+                if not is_similar(original_entry_dict, entry):
+                    changed_entries.append((entry_to_string(original_entry_dict),
+                                            entry_to_string(entry),
+                                            'GEODATA_CORRECTION'))
+                continue
 
-                # Attempt to fix the address with Google Maps
-                address_suggestion = suggest_address_with_google_api(api_key, entry)
-                if address_suggestion:
-                    # Check if the newly suggested address is correct
-                    if verify_dutch_address(address_suggestion):
-                        # Change the entry to the suggestion
-                        entry['address'] = address_suggestion['address']
-                        entry['postal_code'] = address_suggestion['postal_code']
-                        entry['city'] = address_suggestion['city']
-                        changed_entries.append((entry_to_string(original_entry_dict), entry_to_string(entry.to_dict()),
-                                                'GOOGLE_SUGGESTION_DUTCH'))
-                        continue
-                    # TODO: Google maps vond wel een adres, maar de database vindt hem niet valid?
-                    # TODO: Zie hierna, zelfde case maar met meer info?
-
-                # TODO: Attempt to fix the address by ignoring the street name and using the postal code
-                # TODO: Doe dit met de geocode api.
-                # TODO: Also: als er meerde entries zijn check dan of adres overal hetzelfde is dan is het goed
-                if verify_dutch_address(entry, ignore_argument="straatnaam"):
-                    changed_entries.append((entry_to_string(original_entry_dict), entry_to_string(entry.to_dict()),
-                                            'GEODATA_SUGGESTION_CHANGE_STREET_NAME'))
-                    continue
-
-                # TODO: Als dit ook niet werkt: misschien was de woonplaatsnaam fout?
-                # TODO: Geocode api query zonder woonplaatsnaam. Als er 1 resultaat is, verander dan
-                if verify_dutch_address(entry, ignore_argument="woonplaatsnaam"):
-                    changed_entries.append((entry_to_string(original_entry_dict), entry_to_string(entry.to_dict()),
-                                            'GEODATA_SUGGESTION_CHANGE_CITY'))
-                    continue
-
-                if verify_dutch_address(entry, ignore_argument="postcode"):
-                    changed_entries.append((entry_to_string(original_entry_dict), entry_to_string(entry.to_dict()),
-                                            'GEODATA_SUGGESTION_CHANGE_POSTAL_CODE'))
-                    continue
-            else:
-                # Verify the international address with the Google Maps API
-                address_suggestion = suggest_address_with_google_api(api_key, entry, False)
-                if address_suggestion:
-                    # Check if the suggestion changed something. If so, add it to the changed entries
-                    if not entry['address'].lower() == address_suggestion['address'].lower().replace(u'\xdf', 'ss') \
-                            or not entry['postal_code'].lower() == address_suggestion['postal_code'].lower() \
-                            or not entry['city'].lower() == address_suggestion['city'].lower().replace(u'\xdf', 'ss') \
-                            or not entry['country'].lower() == address_suggestion['country'].lower():
-                        changed_entries.append((entry_to_string(original_entry_dict),
-                                                entry_to_string(address_suggestion),
-                                                'GOOGLE_SUGGESTION_NON_DUTCH'))
+            # Attempt to fix the address with Google Maps
+            address_suggestion = suggest_address_with_google_api(api_key, entry)
+            if address_suggestion:
+                # Check if the newly suggested address is correct
+                if verify_dutch_address(address_suggestion):
                     # Change the entry to the suggestion
                     entry['address'] = address_suggestion['address']
                     entry['postal_code'] = address_suggestion['postal_code']
                     entry['city'] = address_suggestion['city']
-                    entry['country'] = address_suggestion['country']
+                    changed_entries.append((entry_to_string(original_entry_dict), entry_to_string(entry.to_dict()),
+                                            'GOOGLE_SUGGESTION_DUTCH'))
                     continue
 
-            # TODO: Request user? anders verwijderen
-            print(f'\n{entry_to_string(entry)}')
+            # Maybe the street name is wrong? Attempt to fix it whilst ignoring the street name
+            if verify_dutch_address(entry, ignore_argument="straatnaam"):
+                changed_entries.append((entry_to_string(original_entry_dict), entry_to_string(entry.to_dict()),
+                                        'GEODATA_SUGGESTION_CHANGE_STREET_NAME'))
+                continue
 
-        except InvalidAddressException as err:
-            if not err.query or not query_yes_no(f"\n---------------------------------------------------\n"
-                                                 f"The following entry was found to be invalid:\n"
-                                                 f"{entry_to_string(entry)}\n"
-                                                 f"Reason: {err.message}\n"
-                                                 f"Do you want to add this address anyway?", "no"):
-                # Drop invalid results
-                entries_to_drop.append(i)
-                invalid_entries.append(original_entry_dict)
+            # Maybe the city is wrong? Attempt to fix it whilst ignoring the city
+            if verify_dutch_address(entry, ignore_argument="woonplaatsnaam"):
+                changed_entries.append((entry_to_string(original_entry_dict), entry_to_string(entry.to_dict()),
+                                        'GEODATA_SUGGESTION_CHANGE_CITY'))
+                continue
+
+            # Maybe the postal code is wrong? Attempt to fix it whilst ignoring the postal code
+            if verify_dutch_address(entry, ignore_argument="postcode"):
+                changed_entries.append((entry_to_string(original_entry_dict), entry_to_string(entry.to_dict()),
+                                        'GEODATA_SUGGESTION_CHANGE_POSTAL_CODE'))
+                continue
+        else:
+            # Verify the international address with the Google Maps API
+            address_suggestion = suggest_address_with_google_api(api_key, entry, False)
+            if address_suggestion:
+                # Check if the suggestion changed something. If so, add it to the changed entries
+                if not is_similar(entry, address_suggestion):
+                    changed_entries.append((entry_to_string(original_entry_dict),
+                                            entry_to_string(address_suggestion),
+                                            'GOOGLE_SUGGESTION_NON_DUTCH'))
+                # Change the entry to the suggestion
+                entry['address'] = address_suggestion['address']
+                entry['postal_code'] = address_suggestion['postal_code']
+                entry['city'] = address_suggestion['city']
+                entry['country'] = address_suggestion['country']
+                continue
+
+        if not query_yes_no(f"\n---------------------------------------------------\n"
+                            f"We could not validate the correctness of the following address:\n"
+                            f"{entry_to_string(entry)}\n"
+                            f"Do you want to add this address anyway?", "no"):
+            entries_to_drop.append(i)
+            invalid_entries.append(original_entry_dict)
 
     # Drop invalid entries and reset the indices
-    entries.drop(entries.index[entries_to_drop], inplace=True)
+    entries.drop(entries_to_drop, inplace=True)
     entries.reset_index(drop=True, inplace=True)
 
     # Log changes to output files
@@ -385,6 +376,4 @@ def correct_entries(entries, output_dir):
         file.write('\n\n\n'.join(map(lambda changed_entry: f'ORIGINAL:\n{changed_entry[0]}\n'
                                                            f'CHANGED:\n{changed_entry[1]}\n'
                                                            f'REASON: {changed_entry[2]}', changed_entries)))
-        # file.write('\n\n\n'.join({f'ORIGINAL:\n{original}\n'
-        #                          f'CHANGED:\n{changed}'
-        #                          for original, changed in changed_entries.items()}))
+    return len(invalid_entries), len(changed_entries)
