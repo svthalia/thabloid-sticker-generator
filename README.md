@@ -5,7 +5,7 @@ The Thabloid Sticker Generator Application is an application that can be used to
 - Install the requirements in requirements.txt:
 
   ``pip install -r requirements.txt``
-- Executing the application with pyton version >= 3.8:
+- Executing the application with Python version >= 3.8:
 
   ``python main.py``
 
