@@ -76,8 +76,9 @@ def get_api_key() -> str:
 
         # Check that the api key is valid
         url = f"https://maps.googleapis.com/maps/api/geocode/json?address=a&key={api_key}"
-        if json.loads(request.urlopen(url).read())["status"] == "REQUEST_DENIED":
-            raise InvalidApiKeyException("The API key in credentials.json was invalid")
+        with request.urlopen(url) as response:
+            if json.loads(response.read())["status"] == "REQUEST_DENIED":
+                raise InvalidApiKeyException("The API key in credentials.json was invalid")
 
     return api_key
 
@@ -107,15 +108,15 @@ def request_from_google_api(api_key: str, arguments: str):
         If no valid result was received
     """
     url = f"https://maps.googleapis.com/maps/api/geocode/json?{arguments}&key={api_key}"
-    response = request.urlopen(url)
-    try:
-        response = json.loads(response.read().decode("utf-8"))
-    except NameError:
-        return None
+    with request.urlopen(url) as response:
+        try:
+            response = json.loads(response.read().decode("utf-8"))
+        except NameError:
+            return None
 
-    if not response["status"] == "OK":
-        return None
-    return response
+        if not response["status"] == "OK":
+            return None
+        return response
 
 
 def request_entry_with_google_api(api_key: str, entry, include_city: bool = False):
@@ -209,15 +210,17 @@ def suggest_address_with_google_api(api_key: str, entry, in_nl: bool = True):
     result = entry.to_dict()
     # Get a response from the address and city
     address = request_entry_with_google_api(api_key, entry, True)
-    if in_nl:
-        # If no response was received, or the response country was invalid,
-        #  or no full address was provided, try without city
-        if not address or not address['country_short'] == 'NL' or not address['street_name'] \
+
+    if not address:
+        # If the address is invalid, try without the city
+        address = request_entry_with_google_api(api_key, entry, False)
+    elif in_nl:
+        # Otherwise, if the address was valid and in the Netherlands, check that it is fully valid.
+        # If not, try without city
+        if not address['country_short'] == 'NL' or not address['street_name'] \
                 or not address['street_number'] or not address['postal_code'] \
                 or not address['city']:
             address = request_entry_with_google_api(api_key, entry, False)
-    elif not address:
-        address = request_entry_with_google_api(api_key, entry, False)
 
     # If all fails, raise an exception
     if not address:
@@ -282,15 +285,10 @@ def query_dutch_georegister(street, house_number, postal_code, city, house_numbe
         attempts = 3
         for i in range(0, attempts - 1):
             try:
-                response = request.urlopen(url, timeout=5)
-                break
-            except RemoteDisconnected:
-                if i == attempts - 1:
-                    return None
-            except TimeoutError:
-                if i == attempts - 1:
-                    return None
-            except URLError:
+                with request.urlopen(url, timeout=5) as response2:
+                    response = response2
+                    break
+            except (RemoteDisconnected, TimeoutError, URLError):
                 if i == attempts - 1:
                     return None
         return json.loads(response.read().decode("utf-8"))['response']
@@ -302,7 +300,6 @@ def verify_dutch_address(entry, ignore_argument: str = ""):
     """
     Verifies a Dutch address for correctness. If it was correct, some small changes to the address
     might be made to improve the quality.
-
     Parameters
     ----------
     entry
