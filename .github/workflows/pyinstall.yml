@@ -1,0 +1,53 @@
+name: PyInstall Workflow
+
+on: [push]
+
+jobs:
+  build-windows:
+    runs-on: windows-2019
+    strategy:
+      matrix:
+        python-version: ["3.8"]
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v3
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+    - name: Run PyInstaller
+      run: |
+        mkdir build
+        cd build
+        pyinstaller --onefile --name "ThabloidStickerGenerator" --clean --add-data "../resources/cmunss.ttf;resources" ../main.py
+    - uses: actions/upload-artifact@v2
+      with:
+        name: ThabloidStickerGenerator
+        path: dist/ThabloidStickerGenerator.exe
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.event.head_commit.message }}
+        release_name: ${{ github.event.head_commit.message }}
+        overwrite: true
+        body: |
+          Test Release
+        draft: false
+        prerelease: false
+    - name: Upload Release Asset
+      id: upload_release_asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: dist/ThabloidStickerGenerator.exe
+        asset_name: ThabloidStickerGenerator.exe
+        asset_content_type: application/zip
