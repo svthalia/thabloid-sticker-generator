@@ -32,4 +32,4 @@ jobs:
       with:
         artifacts: "./build/dist/ThabloidStickerGenerator.exe"
         replaceArtifacts: false
-        token: ${{ secrets.TOKEN }}
+        token: ${{ secrets.GITHUB_TOKEN }}
