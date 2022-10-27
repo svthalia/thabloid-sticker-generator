@@ -27,30 +27,9 @@ jobs:
         mkdir build
         cd build
         pyinstaller --onefile --name "ThabloidStickerGenerator" --clean --add-data "../resources/cmunss.ttf;resources" ../main.py
-    - uses: actions/upload-artifact@v2
-      with:
-        name: ThabloidStickerGenerator
-        path: build/dist/ThabloidStickerGenerator.exe
     - name: Create Release
-      id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      uses: ncipollo/release-action@v1
       with:
-        tag_name: ${{ github.event.head_commit.message }}
-        release_name: ${{ github.event.head_commit.message }}
-        overwrite: true
-        body: |
-          Test Release
-        draft: false
-        prerelease: false
-    - name: Upload Release Asset
-      id: upload_release_asset
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: build/dist/ThabloidStickerGenerator.exe
-        asset_name: ThabloidStickerGenerator.exe
-        asset_content_type: application/zip
+        artifacts: "./build/dist/ThabloidStickerGenerator.exe"
+        replaceArtifacts: false
+        token: ${{ secrets.TOKEN }}
