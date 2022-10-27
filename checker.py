@@ -291,6 +291,7 @@ def query_dutch_georegister(street, house_number, postal_code, city, house_numbe
                     return None
     except HTTPError:
         return None
+    return None
 
 
 def verify_dutch_address(entry, ignore_argument: str = ""):

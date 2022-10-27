@@ -254,7 +254,8 @@ exclude-protected=_asdict,
                   _fields,
                   _replace,
                   _source,
-                  _make
+                  _make,
+                  _MEIPASS
 
 # List of valid names for the first argument in a class method.
 valid-classmethod-first-arg=cls
