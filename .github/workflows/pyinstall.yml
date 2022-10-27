@@ -27,7 +27,7 @@ jobs:
     - uses: actions/upload-artifact@v2
       with:
         name: ThabloidStickerGenerator
-        path: dist/ThabloidStickerGenerator.exe
+        path: build/dist/ThabloidStickerGenerator.exe
     - name: Create Release
       id: create_release
       uses: actions/create-release@v1
@@ -48,6 +48,6 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: dist/ThabloidStickerGenerator.exe
+        asset_path: build/dist/ThabloidStickerGenerator.exe
         asset_name: ThabloidStickerGenerator.exe
         asset_content_type: application/zip
