@@ -1,6 +1,9 @@
 name: PyInstall Workflow
 
-on: [push]
+on:
+  push:
+    tags:
+      - v1.**
 
 jobs:
   build-windows:
