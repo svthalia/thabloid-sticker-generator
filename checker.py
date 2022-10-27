@@ -281,17 +281,14 @@ def query_dutch_georegister(street, house_number, postal_code, city, house_numbe
         .replace(' ', '+')
     try:
         # As the Geodata API is sometimes unstable, we try to send the request a number of times
-        response = None
         attempts = 3
         for i in range(0, attempts - 1):
             try:
-                with request.urlopen(url, timeout=5) as response2:
-                    response = response2
-                    break
+                with request.urlopen(url, timeout=5) as response:
+                    return json.loads(response.read().decode("utf-8"))['response']
             except (RemoteDisconnected, TimeoutError, URLError):
                 if i == attempts - 1:
                     return None
-        return json.loads(response.read().decode("utf-8"))['response']
     except HTTPError:
         return None
 

@@ -1,6 +1,8 @@
 """
 File containing functionality to generate PDFs, given a list of entries
 """
+import os
+import sys
 
 import pandas as pd
 from reportlab.pdfgen import canvas
@@ -45,11 +47,16 @@ def generate_pdf(input_data: pd.DataFrame, out_file: str):
     pd.DataFrame:
         A DataFrame containing all correct CSV file entries
     """
+    # Loading PDF font
+    if getattr(sys, 'frozen', False):
+        font = os.path.join(sys._MEIPASS, 'resources/cmunss.ttf')
+    else:
+        font = "resources/cmunss.ttf"
     # Initialise PDF settings
     print(f"Exporting {len(input_data)} addresses to {out_file}...")
     pdf = canvas.Canvas(out_file, pagesize=(PPM * PAGE_WIDTH, PPM * PAGE_HEIGHT))
     pdf.setTitle("Thabloid Stickers")
-    pdfmetrics.registerFont(TTFont("cmunss", "resources/cmunss.ttf"))
+    pdfmetrics.registerFont(TTFont("cmunss", font))
     pdf.setFont("cmunss", 11)
 
     # Loop through all input entries
