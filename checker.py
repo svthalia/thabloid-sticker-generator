@@ -312,6 +312,8 @@ def verify_dutch_address(entry, ignore_argument: str = ""):
         return False
     postal_code = entry["postal_code"].upper().replace(" ", "")
 
+    response = None
+    response_num_found = 0
     if ignore_argument == "straatnaam":
         response = query_dutch_georegister(None, house_number, postal_code, entry['city'],
                                            house_number_extra)
@@ -321,38 +323,41 @@ def verify_dutch_address(entry, ignore_argument: str = ""):
     elif ignore_argument == "postcode":
         response = query_dutch_georegister(street, house_number, None, entry['city'],
                                            house_number_extra)
-        if int(response['numFound']) == 0:
+        response_num_found = min(int(response['numFound']), len(response['docs']))
+        if response_num_found == 0:
             response = query_dutch_georegister(street, house_number, None, entry['city'], None)
     else:
         response = query_dutch_georegister(street, house_number, postal_code, entry['city'],
                                            house_number_extra)
+    response_num_found = min(int(response['numFound']), len(response['docs']))
 
     removed_extra = False
-    if not response or response['numFound'] > 25000:
+    if not response or response_num_found > 25000:
         # If there was no response or there were WAY too many results, we return a failure
         return False
 
-    if response['numFound'] == 0 and house_number_extra:
+    if response_num_found == 0 and house_number_extra:
         # If there were 0 results and a house number extra was used, try it again,
         # but without the extra part
         response = query_dutch_georegister(street, house_number, postal_code, entry['city'])
-        if response['numFound'] == 0:
+        response_num_found = min(int(response['numFound']), len(response['docs']))
+        if response_num_found == 0:
             return False
         removed_extra = True
-    elif response['numFound'] == 0:
+    elif response_num_found == 0:
         # Otherwise, if there were 0 results, we return false
         return False
-    elif response['numFound'] > 1 and ignore_argument:
+    elif response_num_found > 1 and ignore_argument:
         result_index = 0
         if ignore_argument == "postcode":
             # For the postal code, if there are over 10 responses, we ignore the results
-            if int(response['numFound']) > 10:
+            if response_num_found > 10:
                 return False
             # Otherwise, if there is more than one response, we check if we have a match
-            if int(response['numFound']) != 1:
+            if response_num_found != 1:
                 # Else, check if there is exactly one that has matching data
                 result_index = -1
-                for i in range(0, int(response['numFound'])):
+                for i in range(0, response_num_found):
                     if street in response['docs'][i]['straatnaam'] \
                             and response['docs'][i]['huis_nlt'].startswith(house_number) \
                             and response['docs'][i]['woonplaatsnaam'] == entry['city']:
@@ -368,7 +373,7 @@ def verify_dutch_address(entry, ignore_argument: str = ""):
             # For the street name and city name, check if the ignored elements
             # are the same for all responses
             expected = response['docs'][0][ignore_argument]
-            for i in range(1, response['numFound']):
+            for i in range(1, response_num_found):
                 if not response['docs'][i][ignore_argument] == expected:
                     return False
         # If they are, set that value and return
@@ -383,7 +388,7 @@ def verify_dutch_address(entry, ignore_argument: str = ""):
         return True
 
     response_address = response['docs'][0]
-    if response['numFound'] == 1:
+    if response_num_found == 1:
         if not removed_extra:
             # If the initial query was fully correct, we set the street name accordingly
             entry['address'] = f"{response_address['straatnaam']} {response_address['huis_nlt']}"

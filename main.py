@@ -11,7 +11,7 @@ from checker import correct_entries
 from pdf import generate_pdf
 
 AUTHORS = ['Lars Jeurissen']
-VERSION = '1.0'
+VERSION = '1.0.4'
 PROGRAM_ART = ('  _______ _           _     _       _     _      \n'
                ' |__   __| |         | |   | |     (_)   | |     \n'
                '    | |  | |__   __ _| |__ | | ___  _  __| |     \n'
