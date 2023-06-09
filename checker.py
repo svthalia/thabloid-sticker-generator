@@ -329,11 +329,15 @@ def verify_dutch_address(entry, ignore_argument: str = ""):
     else:
         response = query_dutch_georegister(street, house_number, postal_code, entry['city'],
                                            house_number_extra)
-    response_num_found = min(int(response['numFound']), len(response['docs']))
 
     removed_extra = False
-    if not response or response_num_found > 25000:
-        # If there was no response or there were WAY too many results, we return a failure
+    if not response:
+        # If there was no response, we return a failure
+        return False
+
+    response_num_found = min(int(response['numFound']), len(response['docs']))
+    if response_num_found > 25000:
+        # If there are WAY too may results, we return a failure
         return False
 
     if response_num_found == 0 and house_number_extra:
