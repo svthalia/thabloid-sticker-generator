@@ -312,8 +312,6 @@ def verify_dutch_address(entry, ignore_argument: str = ""):
         return False
     postal_code = entry["postal_code"].upper().replace(" ", "")
 
-    response = None
-    response_num_found = 0
     if ignore_argument == "straatnaam":
         response = query_dutch_georegister(None, house_number, postal_code, entry['city'],
                                            house_number_extra)
@@ -323,8 +321,7 @@ def verify_dutch_address(entry, ignore_argument: str = ""):
     elif ignore_argument == "postcode":
         response = query_dutch_georegister(street, house_number, None, entry['city'],
                                            house_number_extra)
-        response_num_found = min(int(response['numFound']), len(response['docs']))
-        if response_num_found == 0:
+        if not response or min(int(response['numFound']), len(response['docs'])) == 0:
             response = query_dutch_georegister(street, house_number, None, entry['city'], None)
     else:
         response = query_dutch_georegister(street, house_number, postal_code, entry['city'],
